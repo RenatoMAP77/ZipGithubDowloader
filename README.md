@@ -2,6 +2,8 @@
 
 Aplicação Python com interface gráfica para baixar repositórios do GitHub a partir de tags específicas.
 
+![Interface do Aplicativo](./imgs/Screenshot_1.png)
+
 ## 👤 Autor
 
 **RenatoMAP77** - [GitHub](https://github.com/RenatoMAP77)
