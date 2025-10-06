@@ -18,6 +18,7 @@ class GitHubDownloaderApp:
         self.repo_tags = {}  # Cache de tags por repositório
         
         self.setup_ui()
+        self.load_token()  # Carrega o token do arquivo se existir
         self.load_repos()
     
     def setup_ui(self):
@@ -42,6 +43,9 @@ class GitHubDownloaderApp:
         self.show_token_var = tk.BooleanVar()
         ttk.Checkbutton(token_frame, text="Mostrar", variable=self.show_token_var,
                        command=self.toggle_token_visibility).grid(row=0, column=2)
+        
+        ttk.Button(token_frame, text="💾 Salvar Token", 
+                  command=self.save_token).grid(row=0, column=3, padx=(5, 0))
         
         # === SEÇÃO REPOSITÓRIOS ===
         repos_frame = ttk.LabelFrame(main_frame, text="Repositórios", padding="10")
@@ -84,6 +88,37 @@ class GitHubDownloaderApp:
         
         self.log_text = scrolledtext.ScrolledText(log_frame, height=10, state='disabled')
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    
+    def load_token(self):
+        """Carrega o token do arquivo token.txt se existir"""
+        token_file = Path("token.txt")
+        try:
+            if token_file.exists():
+                with open(token_file, "r", encoding="utf-8") as f:
+                    token = f.read().strip()
+                    if token:
+                        self.token_entry.insert(0, token)
+                        self.log("✅ Token carregado de token.txt")
+                    else:
+                        self.log("⚠️ Arquivo token.txt está vazio")
+        except Exception as e:
+            self.log(f"❌ Erro ao carregar token: {str(e)}")
+    
+    def save_token(self):
+        """Salva o token atual no arquivo token.txt"""
+        token = self.token_entry.get().strip()
+        if not token:
+            messagebox.showwarning("Aviso", "Nenhum token para salvar!")
+            return
+        
+        try:
+            with open("token.txt", "w", encoding="utf-8") as f:
+                f.write(token)
+            self.log("✅ Token salvo em token.txt")
+            messagebox.showinfo("Sucesso", "Token salvo com sucesso!")
+        except Exception as e:
+            self.log(f"❌ Erro ao salvar token: {str(e)}")
+            messagebox.showerror("Erro", f"Erro ao salvar token: {str(e)}")
     
     def toggle_token_visibility(self):
         if self.show_token_var.get():
