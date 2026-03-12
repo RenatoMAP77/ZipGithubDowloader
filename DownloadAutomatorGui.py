@@ -74,9 +74,13 @@ class GitHubDownloaderApp:
         buttons_frame = ttk.Frame(main_frame)
         buttons_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        ttk.Button(buttons_frame, text="🔄 Buscar Tags", 
+        ttk.Button(buttons_frame, text="☑️ Selecionar Todos",
+                  command=self.select_all_repos).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(buttons_frame, text="🔄 Buscar Tags",
                   command=self.fetch_all_tags).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(buttons_frame, text="⬇️ Baixar Selecionados", 
+        ttk.Button(buttons_frame, text="🌿 Buscar Branches",
+                  command=self.fetch_all_branches).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(buttons_frame, text="⬇️ Baixar Selecionados",
                   command=self.start_download).pack(side=tk.LEFT)
         
         # === ÁREA DE LOG ===
@@ -163,16 +167,22 @@ class GitHubDownloaderApp:
             status_label = ttk.Label(repo_frame, text="", foreground="gray")
             status_label.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
             
-            # Combobox para tags (inicialmente desabilitado)
-            tag_combo = ttk.Combobox(repo_frame, state="disabled", width=30)
+            # Combobox para tags/branches (editável para permitir digitação manual)
+            tag_combo = ttk.Combobox(repo_frame, state="normal", width=30)
             tag_combo.grid(row=0, column=2, sticky=tk.E, padx=(10, 0))
-            tag_combo.set("Clique em 'Buscar Tags'")
+            tag_combo.set("Buscar Tags/Branches ou digitar")
             
             self.tag_combos[repo_key] = {
                 'combo': tag_combo,
                 'status': status_label
             }
     
+    def select_all_repos(self):
+        """Seleciona ou desmarca todos os repositórios"""
+        all_selected = all(var.get() for var in self.repo_vars.values())
+        for var in self.repo_vars.values():
+            var.set(not all_selected)
+
     def fetch_all_tags(self):
         """Busca as tags de todos os repositórios selecionados"""
         token = self.token_entry.get().strip()
@@ -192,36 +202,63 @@ class GitHubDownloaderApp:
         """Thread para buscar tags sem travar a interface"""
         for repo_key in selected_repos:
             owner, repo = repo_key.split("/")
-            self.update_status(repo_key, "Buscando...")
-            
+            self.update_status(repo_key, "Buscando tags...")
+
             tags = self.get_all_tags(owner, repo, token)
-            
+
             if tags:
-                self.repo_tags[repo_key] = tags
                 tag_names = [tag['name'] for tag in tags]
-                
-                # Atualizar UI na thread principal
-                self.root.after(0, self._update_combo, repo_key, tag_names)
+                self.root.after(0, self._update_combo, repo_key, tag_names, "tags")
                 self.log(f"✅ {repo_key}: {len(tags)} tag(s) encontrada(s)")
             else:
-                self.root.after(0, self._update_combo, repo_key, [])
+                self.root.after(0, self._update_combo, repo_key, [], "tags")
                 self.log(f"⚠️ {repo_key}: Nenhuma tag encontrada")
+
+    def fetch_all_branches(self):
+        """Busca as branches de todos os repositórios selecionados"""
+        token = self.token_entry.get().strip()
+        if not token:
+            messagebox.showwarning("Aviso", "Por favor, insira o GitHub Token!")
+            return
+
+        selected = [key for key, var in self.repo_vars.items() if var.get()]
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione pelo menos um repositório!")
+            return
+
+        self.log("🌿 Buscando branches...")
+        threading.Thread(target=self._fetch_branches_thread, args=(selected, token), daemon=True).start()
+
+    def _fetch_branches_thread(self, selected_repos, token):
+        """Thread para buscar branches sem travar a interface"""
+        for repo_key in selected_repos:
+            owner, repo = repo_key.split("/")
+            self.update_status(repo_key, "Buscando branches...")
+
+            branches = self.get_all_branches(owner, repo, token)
+
+            if branches:
+                branch_names = [b['name'] for b in branches]
+                self.root.after(0, self._update_combo, repo_key, branch_names, "branches")
+                self.log(f"✅ {repo_key}: {len(branches)} branch(es) encontrada(s)")
+            else:
+                self.root.after(0, self._update_combo, repo_key, [], "branches")
+                self.log(f"⚠️ {repo_key}: Nenhuma branch encontrada")
     
-    def _update_combo(self, repo_key, tag_names):
-        """Atualiza o combobox com as tags (executado na thread principal)"""
+    def _update_combo(self, repo_key, names, label="tags"):
+        """Atualiza o combobox com as tags/branches (executado na thread principal)"""
         combo_info = self.tag_combos[repo_key]
         combo = combo_info['combo']
         status = combo_info['status']
-        
-        if tag_names:
-            combo['values'] = tag_names
-            combo.current(0)
-            combo['state'] = 'readonly'
-            status.config(text=f"({len(tag_names)} tags)", foreground="green")
+
+        if names:
+            combo['values'] = names
+            combo.set(names[0])
+            status.config(text=f"({len(names)} {label})", foreground="green")
         else:
-            combo.set("Nenhuma tag")
-            combo['state'] = 'disabled'
-            status.config(text="(sem tags)", foreground="red")
+            combo.set("")
+            combo['values'] = []
+            status.config(text=f"(sem {label})", foreground="red")
     
     def update_status(self, repo_key, text):
         """Atualiza o status de um repositório"""
@@ -229,6 +266,25 @@ class GitHubDownloaderApp:
         status = combo_info['status']
         self.root.after(0, lambda: status.config(text=text, foreground="blue"))
     
+    def get_all_branches(self, owner, repo, token):
+        """Obtém todas as branches do repositório"""
+        url = f"https://api.github.com/repos/{owner}/{repo}/branches"
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                self.log(f"⚠️ Erro {response.status_code} ao buscar branches")
+                return None
+        except Exception as e:
+            self.log(f"❌ Erro ao buscar branches: {str(e)}")
+            return None
+
     def get_all_tags(self, owner, repo, token):
         """Obtém todas as tags do repositório"""
         url = f"https://api.github.com/repos/{owner}/{repo}/tags"
@@ -259,18 +315,19 @@ class GitHubDownloaderApp:
             messagebox.showwarning("Aviso", "Selecione pelo menos um repositório!")
             return
         
-        # Verificar se há tags selecionadas
+        # Verificar se há tags/branches selecionadas ou digitadas
+        _placeholders = {"Buscar Tags/Branches ou digitar", ""}
         downloads = []
         for repo_key in selected:
             combo = self.tag_combos[repo_key]['combo']
-            tag_name = combo.get()
-            
-            if tag_name and tag_name != "Clique em 'Buscar Tags'" and tag_name != "Nenhuma tag":
+            ref_name = combo.get().strip()
+
+            if ref_name and ref_name not in _placeholders:
                 owner, repo = repo_key.split("/")
-                downloads.append((owner, repo, tag_name))
-        
+                downloads.append((owner, repo, ref_name))
+
         if not downloads:
-            messagebox.showwarning("Aviso", "Nenhuma tag válida selecionada!")
+            messagebox.showwarning("Aviso", "Nenhuma tag/branch válida selecionada ou digitada!")
             return
         
         self.log(f"\n📦 Iniciando download de {len(downloads)} repositório(s)...")
@@ -284,9 +341,9 @@ class GitHubDownloaderApp:
         for owner, repo, tag_name in downloads:
             self.log(f"\n{'='*60}")
             self.log(f"Repositório: {owner}/{repo}")
-            self.log(f"Tag: {tag_name}")
+            self.log(f"Ref (tag/branch): {tag_name}")
             self.log(f"{'='*60}")
-            
+
             success = self.download_zip(owner, repo, tag_name, token, repos_dir)
             
             if success:
